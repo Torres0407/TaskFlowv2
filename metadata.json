@@ -1,0 +1,6 @@
+{
+  "name": "TaskFlow",
+  "description": "Multi-tenant project management platform with Kanban boards, real-time team collaboration, and responsive dark mode.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
