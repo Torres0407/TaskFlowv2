@@ -1,0 +1,279 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -----------------------------------------------------------------------------
+// Enums (SPEC.md Section 3)
+// -----------------------------------------------------------------------------
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ActionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum Source {
+  USER
+  ASSISTANT
+}
+
+// -----------------------------------------------------------------------------
+// Entities (SPEC.md Section 3)
+// -----------------------------------------------------------------------------
+
+model User {
+  id               String            @id @default(uuid())
+  email            String            @unique
+  passwordHash     String
+  name             String
+  avatarUrl        String?
+  createdAt        DateTime          @default(now())
+
+  // Relations
+  memberships      Membership[]
+  sentInvitations  Invitation[]      @relation("UserSentInvitations")
+  ledProjects      Project[]         @relation("ProjectLead")
+  assignedTasks    Task[]            @relation("TaskAssignee")
+  createdTasks     Task[]            @relation("TaskCreator")
+  comments         Comment[]
+  attachments      Attachment[]
+  notifications    Notification[]
+  refreshTokens    RefreshToken[]
+  assistantActions AssistantAction[]
+
+  @@map("users")
+}
+
+model Organization {
+  id               String            @id @default(uuid())
+  name             String
+  slug             String            @unique
+  timezone         String            @default("UTC")
+  createdAt        DateTime          @default(now())
+
+  // Relations
+  memberships      Membership[]
+  invitations      Invitation[]
+  projects         Project[]
+  tasks            Task[]
+  comments         Comment[]
+  attachments      Attachment[]
+  notifications    Notification[]
+  assistantActions AssistantAction[]
+
+  @@map("organizations")
+}
+
+model Membership {
+  id           String       @id @default(uuid())
+  userId       String
+  orgId        String
+  role         Role         @default(MEMBER)
+  createdAt    DateTime     @default(now())
+
+  // Relations
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+  @@index([orgId, userId])
+  @@map("memberships")
+}
+
+model Invitation {
+  id           String       @id @default(uuid())
+  orgId        String
+  email        String
+  role         Role         @default(MEMBER)
+  tokenHash    String       @unique
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  revokedAt    DateTime?
+  invitedById  String
+  createdAt    DateTime     @default(now())
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation("UserSentInvitations", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([orgId, email])
+  @@map("invitations")
+}
+
+model Project {
+  id           String       @id @default(uuid())
+  orgId        String
+  key          String
+  name         String
+  description  String?
+  leadId       String?
+  archivedAt   DateTime?
+  createdAt    DateTime     @default(now())
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lead         User?        @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
+  tasks        Task[]
+
+  @@unique([orgId, key])
+  @@index([orgId])
+  @@map("projects")
+}
+
+model Task {
+  id           String       @id @default(uuid())
+  orgId        String
+  projectId    String
+  number       Int
+  title        String
+  description  String?
+  status       TaskStatus   @default(TODO)
+  priority     TaskPriority @default(MEDIUM)
+  assigneeId   String?
+  dueDate      DateTime?
+  position     Float
+  createdById  String
+  source       Source       @default(USER)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignee     User?        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdBy    User         @relation("TaskCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  comments     Comment[]
+  attachments  Attachment[]
+
+  @@unique([projectId, number])
+  @@index([orgId])
+  @@index([orgId, projectId])
+  @@index([orgId, status])
+  @@index([orgId, assigneeId])
+  @@map("tasks")
+}
+
+model Comment {
+  id           String       @id @default(uuid())
+  orgId        String
+  taskId       String
+  authorId     String
+  body         String
+  source       Source       @default(USER)
+  createdAt    DateTime     @default(now())
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  task         Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author       User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([orgId, taskId])
+  @@map("comments")
+}
+
+model Attachment {
+  id           String       @id @default(uuid())
+  orgId        String
+  taskId       String
+  uploadedById String
+  fileName     String
+  mimeType     String
+  size         Int
+  storageKey   String
+  createdAt    DateTime     @default(now())
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  task         Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedBy   User         @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([orgId, taskId])
+  @@map("attachments")
+}
+
+model Notification {
+  id           String       @id @default(uuid())
+  orgId        String
+  userId       String
+  type         String
+  payload      Json
+  readAt       DateTime?
+  createdAt    DateTime     @default(now())
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([orgId, userId])
+  @@map("notifications")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String
+  familyId   String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  // Relations
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+model AssistantAction {
+  id             String       @id @default(uuid())
+  orgId          String
+  userId         String
+  type           String
+  payload        Json
+  status         ActionStatus @default(PENDING)
+  expiresAt      DateTime
+  resolvedAt     DateTime?
+  resultEntityId String?
+  createdAt      DateTime     @default(now())
+
+  // Relations
+  organization   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([orgId, userId])
+  @@index([orgId, status])
+  @@map("assistant_actions")
+}
